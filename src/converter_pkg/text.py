@@ -1,7 +1,7 @@
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from pylatex import NoEscape
 
-from .utils import latex_special_chars
+from .utils import get_paragraph_alignment, latex_special_chars
 
 
 def are_runs_similar(run1, run2):
@@ -124,7 +124,7 @@ def parse_paragraphs(paragraphs, latex_doc, flag_itemize, flag_enumerate):
 
     text = format_runs_in_paragraph(paragraphs, latex_special_chars)
 
-    alignment = paragraphs.alignment
+    alignment = get_paragraph_alignment(paragraphs)
     if alignment == WD_ALIGN_PARAGRAPH.LEFT:
         latex_alignment = "flushleft"
     elif alignment == WD_ALIGN_PARAGRAPH.CENTER:

@@ -1,12 +1,64 @@
 import requests
 import json
+import os
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .prompts import SYSTEM_PROMPT, build_user_prompt
 from .parser import parse_llm_response, create_error_response
+from .rate_limiter import llm_request_queue
 
 
-def _run_single_check(template: str, document: str, check_type: str, model: str, url: str) -> dict:
+DEFAULT_LLM_API_URL = "http://localhost:11434/api/chat"
+OPENAI_CHAT_COMPLETIONS_PATH = "/chat/completions"
+logger = logging.getLogger(__name__)
+
+
+def _get_llm_api_url() -> str:
+    api_url = os.getenv("LLM_API_URL")
+    if api_url:
+        return api_url
+
+    base_url = os.getenv("LLM_API_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+    if base_url:
+        return f"{base_url.rstrip('/')}{OPENAI_CHAT_COMPLETIONS_PATH}"
+
+    return DEFAULT_LLM_API_URL
+
+
+def _get_llm_api_format(url: str) -> str:
+    configured = os.getenv("LLM_API_FORMAT", "auto").strip().lower()
+    if configured in {"openai", "ollama"}:
+        return configured
+    return "openai" if url.rstrip("/").endswith(OPENAI_CHAT_COMPLETIONS_PATH) else "ollama"
+
+
+def _get_headers(api_format: str) -> dict:
+    headers = {"Content-Type": "application/json"}
+    api_key = os.getenv("AI_PROXY_KEY")
+    if api_key and api_format == "openai":
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _extract_response_text(response_data: dict, api_format: str) -> str:
+    if api_format == "openai":
+        choices = response_data.get("choices") or []
+        if not choices:
+            return ""
+        return choices[0].get("message", {}).get("content", "").strip()
+
+    return response_data.get("message", {}).get("content", "").strip()
+
+
+def _run_single_check(
+    template: str,
+    document: str,
+    check_type: str,
+    model: str,
+    url: str,
+    api_format: str
+) -> dict:
     user_prompt = build_user_prompt(template, document, check_type=check_type)
     
     payload = {
@@ -19,12 +71,17 @@ def _run_single_check(template: str, document: str, check_type: str, model: str,
     }
     
     try:
-        response = requests.post(url, json=payload, timeout=120)
+        llm_request_queue.wait_for_turn(model)
+        response = requests.post(url, json=payload, headers=_get_headers(api_format), timeout=1800)
         if not response.ok:
-            return {"check_type": check_type, "error": f"HTTP {response.status_code}", "data": None}
+            return {
+                "check_type": check_type,
+                "error": f"HTTP {response.status_code}: {response.text[:500]}",
+                "data": None
+            }
         
         response_data = response.json()
-        response_text = response_data.get("message", {}).get("content", "").strip()
+        response_text = _extract_response_text(response_data, api_format)
         
         if not response_text:
             return {"check_type": check_type, "error": "Пустой ответ", "data": None}
@@ -33,6 +90,13 @@ def _run_single_check(template: str, document: str, check_type: str, model: str,
         return {"check_type": check_type, "error": None, "data": parsed}
         
     except Exception as e:
+        logger.exception(
+            "LLM check failed: check_type=%s model=%s api_format=%s url=%s",
+            check_type,
+            model,
+            api_format,
+            url,
+        )
         return {"check_type": check_type, "error": str(e), "data": None}
 
 
@@ -87,14 +151,23 @@ def _merge_results(structure: dict, content: dict, formatting: dict) -> dict:
 
 
 def compare_documents(template_content, document_content, model="gpt-oss:120b-cloud", parallel: bool = True):
-    url = "http://localhost:11434/api/chat"
+    url = _get_llm_api_url()
+    api_format = _get_llm_api_format(url)
     check_types = ["structure", "content", "formatting"]
     
     if parallel:
         results = {}
         with ThreadPoolExecutor(max_workers=3) as executor:
             future_to_check = {
-                executor.submit(_run_single_check, template_content, document_content, ct, model, url): ct 
+                executor.submit(
+                    _run_single_check,
+                    template_content,
+                    document_content,
+                    ct,
+                    model,
+                    url,
+                    api_format
+                ): ct
                 for ct in check_types
             }
             for future in as_completed(future_to_check):
@@ -103,7 +176,7 @@ def compare_documents(template_content, document_content, model="gpt-oss:120b-cl
     else:
         results = {}
         for ct in check_types:
-            results[ct] = _run_single_check(template_content, document_content, ct, model, url)
+            results[ct] = _run_single_check(template_content, document_content, ct, model, url, api_format)
     
     return _merge_results(
         structure=results.get("structure", {"check_type": "structure", "error": "Не выполнено", "data": None}),

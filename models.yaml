@@ -1,0 +1,12 @@
+default_model: openai/gpt-5-nano
+
+models:
+  - id: openai/gpt-5-nano
+    name: Простая модель
+    description: Простая модель для базовой проверки
+    usage_limit: 5
+
+  - id: deepseek/deepseek-v4-flash
+    name: Умная модель
+    description: Более умная бодель для более тщательной проверки
+    usage_limit: 2
