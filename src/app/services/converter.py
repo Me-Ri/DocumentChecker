@@ -1,5 +1,7 @@
 import sys
 import os
+import logging
+import traceback
 from pathlib import Path
 
 # Добавляем src в путь, чтобы импорты работали
@@ -8,6 +10,8 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 from converter_pkg.main import convert_to_latex
+
+logger = logging.getLogger(__name__)
 
 class ConverterService:
     @staticmethod
@@ -32,9 +36,11 @@ class ConverterService:
                 "error": None
             }
         except Exception as e:
+            logger.exception("DOCX to LaTeX conversion failed for %s", docx_path)
             return {
                 "success": False,
                 "latex_content": None,
                 "file_path": None,
-                "error": str(e)
+                "error": str(e),
+                "traceback": traceback.format_exc()
             }

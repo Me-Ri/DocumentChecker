@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+test.http
+
+# Local DuckDB storage mounted into Docker.
+data/
+
+# Runtime templates uploaded by administrators.
+doctempletes/*
+!doctempletes/.gitkeep

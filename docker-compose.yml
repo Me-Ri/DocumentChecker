@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      LLM_API_URL: ${LLM_API_URL:-}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      LLM_API_FORMAT: ${LLM_API_FORMAT:-auto}
+      AI_PROXY_KEY: ${AI_PROXY_KEY:-}
+      MODELS_CONFIG_PATH: /app/models.yaml
+      DOCTEMPLATES_DIR: /app/doctempletes
+      ADMIN_LOGINS: ${ADMIN_LOGINS:-}
+      LLM_REQUESTS_PER_MINUTE: ${LLM_REQUESTS_PER_MINUTE:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DUCKDB_PATH: ${DUCKDB_PATH:-/app/data/document_checker.duckdb}
+    volumes:
+      - ${DUCKDB_DATA_DIR:-./data}:/app/data
+      - ${MODELS_CONFIG_FILE:-./models.yaml}:/app/models.yaml:ro
+      - ${DOCTEMPLATES_DIR:-./doctempletes}:/app/doctempletes
+    expose:
+      - "8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/search/Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8000}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
